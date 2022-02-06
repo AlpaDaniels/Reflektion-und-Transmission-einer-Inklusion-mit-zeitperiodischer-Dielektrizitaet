@@ -1,0 +1,133 @@
+"""
+Lotka-Volterra:
+
+"""
+
+from __future__ import print_function
+from fenics import *
+import matplotlib.pyplot as plt
+
+T = 6.5 # final time
+num_steps = int(T*100) # number of time steps
+#print(num_steps)
+dt = T / num_steps # time step size
+t = 0
+print(dt)
+
+ai11 = 1
+ai12 = 1
+ai13 = 1
+ai21 = 1
+ai22 = 1
+ai23 = 1
+ai31 = 1
+ai32 = 1
+ai33 = 1
+
+ri1 = 1
+ri2 = 1
+ri3 = 1
+
+di1 = 1
+di2 = 1
+di3 = 1
+
+# Create mesh and define function space
+mesh = UnitSquareMesh(20,20)
+P1 = FiniteElement('P', triangle, 2)
+element = MixedElement([P1, P1, P1])
+V = FunctionSpace(mesh, element)
+
+# Define Test Functions
+v_1, v_2, v_3 = TestFunctions(V)
+
+# Define functions
+A = Function(V)
+A_n = Function(V)
+#A_nn = Function(V)
+
+# Define boundary condition
+u_D = Expression(('cos(2*pi*x[0])*cos(pi*x[1])*cos(t)','cos(pi*x[0])*cos(2*pi*x[1])*cos(t)','cos(pi*x[0])*cos(x[1])*cos(t)'), degree=2, t=0)
+
+def boundary(x, on_boundary):
+    return on_boundary
+
+bc = DirichletBC(V, u_D, boundary)
+
+# Define initial condition
+A_0 = Expression(('cos(2*pi*x[0])*cos(pi*x[1])','cos(pi*x[0])*cos(2*pi*x[1])','cos(pi*x[0])*cos(pi*x[1])'), degree=2)
+A_n = interpolate(A_0, V)
+
+# Split system functions to access components
+A_1, A_2, A_3 = split(A)
+A_n1, A_n2, A_n3 = split(A_n)
+#A_nn1, A_nn2, A_nn3 = split(A_nn)
+
+# Define expressions used in variationalproblem
+k = Constant(dt)
+
+ai11 = Constant(ai11)
+ai12 = Constant(ai12)
+ai13 = Constant(ai13)
+ai21 = Constant(ai21)
+ai22 = Constant(ai22)
+ai23 = Constant(ai23)
+ai31 = Constant(ai11)
+ai32 = Constant(ai32)
+ai33 = Constant(ai33)
+
+ri1 = Constant(ri1)
+ri2 = Constant(ri2)
+ri3 = Constant(ri3)
+
+di1 = Constant(di1)
+di2 = Constant(di2)
+di3 = Constant(di3)
+
+# Define variational problem first order scheme
+#a = (1/k)*A_1*v_1*dx+di1*dot(grad(A_1),grad(v_1))*dx-(A_1*(-ai11*A_n1-ai12*A_n2-ai13*A_n3)*v_1*dx)+ (1/k)*A_2*v_2*dx+di2*dot(grad(A_2),grad(v_2))*dx-(A_2*(-ai21*A_n2-ai22*A_n3-ai23*A_n1)*v_2*dx)+ (1/k)*A_3*v_3*dx+di3*dot(grad(A_3),grad(v_3))*dx-(A_3*(-ai31*A_n3-ai32*A_n1-ai33*A_n2)*v_3*dx)
+#L = (1/k)*A_n1*v_1*dx+ri1*A_n1*v_1*dx + (1/k)*A_n2*v_2*dx+ri2*A_n2*v_2*dx + (1/k)*A_n3*v_3*dx+ri3*A_n3*v_3*dx
+
+F = (1/k)*A_1*v_1*dx+di1*dot(grad(A_1),grad(v_1))*dx-(A_1*(-ai11*A_n1-ai12*A_n2-ai13*A_n3))*v_1*dx+(1/k)*A_2*v_2*dx+di2*dot(grad(A_2),grad(v_2))*dx-(A_2*(-ai21*A_n2-ai22*A_n3-ai23*A_n1))*v_2*dx+(1/k)*A_3*v_3*dx+di3*dot(grad(A_3),grad(v_3))*dx-(A_3*(-ai31*A_n3-ai32*A_n1-ai33*A_n2))*v_3*dx -((1/k)*A_n1*v_1*dx+ri1*A_n1*v_1*dx + (1/k)*A_n2*v_2*dx+ri2*A_n2*v_2*dx + (1/k)*A_n3*v_3*dx+ri3*A_n3*v_3*dx)
+
+# Create VTK files for visualization output
+vtkfile_A_1 = File('LotkaBA/A_1.pvd')
+vtkfile_A_2 = File('LotkaBA/A_2.pvd')
+vtkfile_A_3 = File('LotkaBA/A_3.pvd')
+
+# Second order scheme (for n>2)
+#a = (1/(2*k))*3*A_1*v_1*dx+di1*dot(grad(A_1),grad(v_1))*dx-(A_1*(-ai11*(2*A_n1-A_nn1)-ai12*(2*A_n2-A_nn2)-ai13*(2*A_n3-A_nn3))*v_1*dx) + (1/(2*k))*3*A_2*v_2*dx+di2*dot(grad(A_2),grad(v_2))*dx-(A_2*(-ai21*(2*A_n2-A_nn2)-ai22*(2*A_n3-A_nn3)-ai23*(2*A_n1-A_nn1))*v_2*dx) + (1/(2*k))*3*A_3*v_3*dx+di3*dot(grad(A_3),grad(v_3))*dx-(A_3*(-ai31*(2*A_n3-A_nn3)-ai32*(2*A_n1-A_nn1)-ai33*(2*A_n2-A_nn2))*v_3*dx)
+#L = (1/(2*k))*4*A_n1*v_1*dx-(1/(2*k))*A_nn1*v_1*dx+ri1*(2*A_n1-A_nn1)*v_1*dx + (1/(2*k))*4*A_n2*v_2*dx-(1/(2*k))*A_nn2*v_2*dx+ri2*(2*A_n2-A_nn2)*v_2*dx + (1/(2*k))*4*A_n3*v_3*dx-(1/(2*k))*A_nn3*v_3*dx+ri1*(2*A_n3-A_nn3)*v_1*dx
+
+#F = (1/(2*k))*(3*A_1-4*A_n1+A_nn1)*v_1*dx+(1/(2*k))*(3*A_2-4*A_n2+A_nn2)*v_2*dx+(1/(2*k))*(3*A_3-4*A_n3+A_nn3)*v_3*dx +di1*dot(grad(A_1),grad(v_1))*dx+ di2*dot(grad(A_2),grad(v_2))*dx+ di3*dot(grad(A_3),grad(v_3))*dx - ri1*(2*A_n1-A_nn1)*dx- ri2*(2*A_n2-A_nn2)*dx- ri3*(2*A_n3-A_nn3)*dx - (A_1*(-ai11*(2*A_n1-A_nn1)-ai12*(2*A_n2-A_nn2)-ai13*(2*A_n3-A_nn3)))*v_1*dx - (A_2*(-ai21*(2*A_n2-A_nn2)-ai22*(2*A_n3-A_nn3)-ai23*(2*A_n1-A_nn1)))*v_2*dx- (A_3*(-ai31*(2*A_n3-A_nn3)-ai32*(2*A_n1-A_nn1)-ai33*(2*A_n2-A_nn2)))*v_3*dx
+#a, L = lhs(F), rhs(F)
+
+# Time-stepping
+m = 1
+for n in range(num_steps-1):
+    
+    # Update time
+    t = t + dt
+    u_D.t = t
+    #print(t)
+
+    # Compute solution
+    #A = Function(V)
+    solve(F == 0, A, bc)
+    
+    # Plot solution
+    if n == m*10:
+        m += 1
+        print(m)
+    
+        # Save solution to file (VTK)
+        A_1_, A_2_, A_3_ = A.split()
+        vtkfile_A_1 << (A_1_, t)
+        vtkfile_A_2 << (A_2_, t)
+        vtkfile_A_3 << (A_3_, t)
+    
+    # Update solution
+    #A_nn.assign(A_n)
+    A_n.assign(A)
+
+print('done')
