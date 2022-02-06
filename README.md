@@ -1,0 +1,1 @@
+# Reflektion-und-Transmission-einer-Inklusion-mit-zeitperiodischer-Dielektrizitaet
