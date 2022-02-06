@@ -1,0 +1,56 @@
+"""
+Subdomain:
+  -kappa*Laplace(u) = f    in the unit square
+            u = u_D  on the boundary
+"""
+
+from __future__ import print_function
+from fenics import *
+import matplotlib.pyplot as plt
+
+# Create mesh and define function space
+nx=ny=25
+mesh = RectangleMesh(Point(-1,-1), Point(1,1), nx, ny)
+V = FunctionSpace(mesh, 'P', 1)
+
+# Define boundary condition
+tol = 1E-14
+
+def boundary_D1(x, on_boundary):
+    return on_boundary and (near(x[0], -1, tol) or near(x[0], 1, tol))
+    #return on_boundary
+    
+#def boundary_D2(x, on_boundary):
+#    return on_boundary and (near(x[1], -1, tol) or near(x[1], 1, tol))
+
+u_D = Expression('2*x[0]*x[0]+2*x[1]*x[1]', degree=2)
+
+#bc1 = DirichletBC(V, u_D, boundary_D1)
+#bc2 = DirichletBC(V, u_D, boundary_D2)
+
+#bc = [bc1, bc2]
+bc = DirichletBC(V,u_D, boundary_D1)
+
+# Define Kappa
+tol = 1E-14
+k_0 = 0.05
+k_1 = 1
+kappa = Expression('pow(x[0]-0.5,2) + pow(x[1]-0.5,2) < 0.1 + tol ? k_0 : k_1', degree=2, tol=tol, k_0=k_0, k_1=k_1)
+
+# Define variational problem
+u = TrialFunction(V)
+v = TestFunction(V)
+f = Constant(-8.0)
+g = Expression('4', degree=1)
+a = kappa*dot(grad(u), grad(v))*dx
+L = f*v*dx + g*v*ds
+
+# Compute solution
+u = Function(V)
+solve(a == L, u, bc)
+
+# Save solution to file in VTK format
+vtkfile = File('SubdomainBA/solution.pvd')
+vtkfile << u
+
+print('done')
