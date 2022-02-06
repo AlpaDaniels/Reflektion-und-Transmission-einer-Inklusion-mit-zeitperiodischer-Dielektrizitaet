@@ -1,0 +1,189 @@
+from __future__ import print_function
+from fenics import *
+import matplotlib.pyplot as plt
+import numpy as np
+import math
+from mshr import *
+
+T = 30.0            # final time
+num_steps = int(T*100)     # number of time steps
+dt = T / num_steps # timestep size
+print(dt)
+
+# Create mesh and define function space
+R = 9
+delta = 5
+a1 = 2
+a2 = 1
+nx = int(R*10)
+#print(nx)
+ny = int(delta*8)
+#print(ny)
+N1=0.9
+
+mesh = RectangleMesh(Point(-R-a1,-delta-a2), Point(R+a1,delta+a2), nx, ny)
+
+P1 = FiniteElement('P', triangle, 1)
+element = MixedElement([P1, P1, P1, P1])
+V = FunctionSpace(mesh, element)
+W = FunctionSpace(mesh, 'P', 1)
+
+# Define Test Functions
+v_1, v_2, v_3, v_4 = TestFunctions(V)
+
+# Define functions
+u = Function(V)
+u_n = Function(V)
+u_nn = Function(V)
+
+# Define boundary condition
+tol = 1E-14
+
+def boundary_D(x, on_boundary):
+    #return on_boundary and (near(x[0], (-R-a1), tol) or near(x[0], (R+a1), tol))
+    return on_boundary
+    
+u_D = Expression('0', degree=1)
+
+bc = DirichletBC(V.sub(0), u_D, boundary_D)
+
+# Define initial value
+u_NN = Expression(('0','0','0','0'), degree=1)
+u_nn = interpolate(u_NN, V) # n-2
+u_N = Expression(('0','0','0','0'), degree=1)
+u_n = interpolate(u_N, V) # n-1
+#u_1 = u(0) + dt* u'(0)
+
+E_n, P_n, psi_n1, psi_n2 = u_n.split()
+E_nn, P_nn, psi_nn1, psi_nn3 = u_nn.split()
+vtkfile_uNN = File('TildeProblemPlaneWave/uNN.pvd')
+vtkfile_uNN << E_nn
+vtkfile_uN = File('TildeProblemPlaneWave/uN.pvd')
+vtkfile_uN << E_n
+
+# Split system functions to access components
+E, P,  psi_1, psi_2 = split(u)
+E_n, P_n, psi_n1, psi_n2 = split(u_n)
+E_nn, P_nn, psi_nn1, psi_nn3 = split(u_nn)
+
+# Define Theta-Function for PML
+ctheta1 = 25
+ctheta2 = 25
+#theta_1 = Expression('-R-a < x[0] < -R || R < x[0] < R+a ? 1 : 0', degree=1, R=R, a=a)
+#theta_2 = Expression('-R-a < x[0] < -R || R < x[0] < R+a ? 1 : 0', degree=1, R=R, a=a)
+theta_1 = Expression('((x[0]<-R) || (x[0] > R)) ? ( ctheta1*(((fabs(x[0])-R)/a1)-((sin(2*pi*(fabs(x[0])-R)/a1)))/(2*pi)) ) :0', degree=1, ctheta1=ctheta1, R=R, a1=a1)
+theta_2 = Expression('((x[1]<-delta) || (x[1] > delta)) ? ( ctheta2*(((fabs(x[1])-delta)/a2)-((sin(2*pi*(fabs(x[1])-delta)/a2)))/(2*pi)) ) :0', degree=1, ctheta2=ctheta2, delta=delta, a2=a2)
+#theta_2 = Expression('((x[1]<-delta) || (x[1] > delta)) ? 0:0', degree=1, delta=delta)
+
+theta_n1 = Function(W)
+theta_n2 = Function(W)
+
+theta_n1 = interpolate(theta_1, W)
+theta_n2 = interpolate(theta_2, W)
+
+vtkfile_theta1 = File('TildeProblemPlaneWave/theta1.pvd')
+vtkfile_theta1 << theta_n1
+vtkfile_theta2 = File('TildeProblemPlaneWave/theta2.pvd')
+vtkfile_theta2 << theta_n2
+
+d = Constant(dt)
+
+# Define variational problem
+
+#K = Expression('(x[0]>-6) && (x[0]<-4)  ? 1 : 0', degree=1) #K Streifen
+K = Expression('(pow(x[0]-4,2) + pow(x[1],2) < 1.39) ? 1 : 0', degree=1) #K Kreis
+K_n = Function(W)
+K_n = interpolate(K, W)
+vtkfile_K = File('TildeProblemPlaneWave/K.pvd')
+vtkfile_K << K_n
+
+Einc = Expression('exp(-((t-(x[0]+4))*(t-(x[0]+4)))/18.5)*cos((6/5)*(t-(x[0]+4)))', degree=1, t=0) #Einc
+#Einc_n = interpolate(Einc,W)
+Eincdx = Expression('exp(-((t-(x[0]+4))*(t-(x[0]+4)))/18.5)*(t-(x[0]+4))*(2/18.5)*cos((6/5)*(t-(x[0]+4)))+exp(-((t-(x[0]+4))*(t-(x[0]+4)))/18.5)*(6/5)*sin((6/5)*(t-(x[0]+4)))', degree=1, t=0) #dxEinc
+
+f = Expression('396*(1+N1*cos((2/5)*t))', degree=1, t=0, N1=N1)
+
+#Etilde = E - Einc
+F = (1/(d*d))*(E-2*E_n+E_nn)*v_1*dx+K*(1/(d*d))*(P-2*P_n+P_nn)*v_1*dx+(theta_1+theta_2)*(1/(2*d))*(E-E_nn)*v_1*dx+(theta_1*theta_2)*E*v_1*dx+(1/(d*d))*(P-2*P_n+P_nn)*v_2*dx+(3/4)*(1/(2*d))*(P-P_nn)*v_2*dx+36*P*v_2*dx-f*K*E*v_2*dx-f*K*Einc*v_2*dx+dot(grad(E),grad(v_1))*dx-psi_1.dx(0)*v_1*dx-psi_2.dx(1)*v_1*dx+(1/d)*(psi_1-psi_n1)*v_3*dx+theta_1*psi_1*v_3*dx-(theta_2-theta_1)*E.dx(0)*v_3*dx+(1/d)*(psi_2-psi_n2)*v_4*dx+theta_2*psi_2*v_4*dx-(theta_1-theta_2)*E.dx(1)*v_4*dx
+
+#-(theta_2-theta_1)*Eincdx*v_3*dx
+
+vtkfile_Etilde = File('TildeProblemPlaneWave/Etilde.pvd')
+vtkfile_Einc = File('TildeProblemPlaneWave/Einc.pvd')
+vtkfile_E = File('TildeProblemPlaneWave/E.pvd')
+vtkfile_P = File('TildeProblemPlaneWave/P.pvd')
+vtkfile_psi_1 = File('TildeProblemPlaneWave/psi_1.pvd')
+vtkfile_psi_2 = File('TildeProblemPlaneWave/psi_2.pvd')
+
+A=np.zeros(int(num_steps-1))
+B=np.zeros(int(num_steps-1))
+
+Esave2 = interpolate(Einc,W)
+
+# Time-stepping
+t = dt
+
+m = 1
+for n in range(num_steps-1):
+
+    # Update current time
+    t += dt
+    f.t = t
+    Einc.t=t
+    Eincdx.t=t
+    #Einc_n.t=t
+
+    # Compute solution
+    solve(F == 0, u, bc)
+
+    # Plot solution
+    if n == m*10:
+        m += 1
+        print(m)
+
+        # Save solution to file (VTK)
+        E, P, psi_1, psi_2 = u.split()
+        vtkfile_Etilde << (E, t)
+        Einc_n = interpolate(Einc,W)
+        Esave = project(Einc_n+E, W)
+        Esave2.vector()[:]=Esave.vector()[:]
+        Esave2.rename("E","E")
+        vtkfile_Einc << (Einc_n, t)
+        vtkfile_E << (Esave2, t)
+        vtkfile_P << (P, t)
+        vtkfile_psi_1 << (psi_1, t)
+        vtkfile_psi_2 << (psi_2, t)
+        
+    point1 = np.array([7.32,0.])
+    point2 = np.array([4.,2.37])
+    # and then store the output in 'result':
+    result = np.array([0.])
+    E, P, psi_1, psi_2 = u.split()
+    
+    Einc_n = interpolate(Einc,W)
+    Esave = project(Einc_n+E, W)
+    Esave2.vector()[:]=Esave.vector()[:]
+    
+    Esave2.eval(result,point1)
+    A[n]=result
+    #print(result)
+    
+    Esave2.eval(result,point2)
+    B[n]=result
+    #print(result)
+
+    # Update previous solution
+    u_nn.assign(u_n)
+    u_n.assign(u)
+
+fig, (ax1, ax2) = plt.subplots(1, 2)
+
+ax1.plot(np.array(A))
+#ax1[0, 0].set_title('A')
+ax2.plot(np.array(B))
+#ax2[0, 1].set_title('B')
+
+#plt.plot(np.array(A))
+#plt.plot(np.array(B))
+print('done')
+plt.show()
